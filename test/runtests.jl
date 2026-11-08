@@ -175,6 +175,27 @@ thin(T, v) = FULL || T == Float64 ? v : v[1:2:end]
         end
       end
     end
+    # many lines with a prime factor above MAX_RADIX_PRIME: slices and lane blocks over the tasks,
+    # Bluestein kernels (127, 1009, 37) and composite kernels (129 = 3·43, 2018 = 2·1009)
+    for (sz, region) in pick([((256, 127, 16), 1:3), ((16, 256, 127), (3,)), ((1009, 64), (1,)), ((64, 1009), (2,)),
+                              ((37, 37, 37), 1:3), ((129, 300), 1:2), ((300, 129), 1:2), ((2018, 32), (1,)), ((32, 2018), (2,))],
+                             [((256, 127, 16), 1:3), ((64, 1009), (2,)), ((1009, 64), (1,)), ((300, 129), 1:2)])
+      x = randn(Complex{T}, sz...)
+      for mk in (FFTL.plan_fft, FFTL.plan_bfft)
+        ref = mk(x, region; threads = 1) * x
+        @test !any(k -> k isa FFTL.LinesMT, mk(x, region; threads = 1).kernels)
+        for nt in pick((2, 3, 4, 8), (3,))
+          p = mk(x, region; threads = nt)
+          @test any(k -> k isa FFTL.LinesMT, p.kernels)
+          @test relerr(p * x, ref) < tol(T)
+          z = copy(x); mul!(z, p, z)
+          @test relerr(z, ref) < tol(T)
+        end
+      end
+    end
+    # below the threshold of threaded work the serial kernels stay
+    x = randn(Complex{T}, 127, 16)
+    @test !any(k -> k isa FFTL.LinesMT, FFTL.plan_fft(x; threads = 3).kernels)
   end
 
   @testset "real passes, $T" for T in (Float64, Float32)

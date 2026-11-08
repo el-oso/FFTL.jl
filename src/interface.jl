@@ -74,6 +74,7 @@ function FFTLPlan{T}(sz::NTuple{N,Int}, region, σ::Int; threads::Integer = Thre
     composite_mt_dim(T, sz, d, nt) && return CompositeMT{T}(sz[d], σ, nt)
     bluestein_mt_dim(sz, d, nt) && return BluesteinMT{T}(sz[d], σ, nt)
     S, _ = dim_extent(sz, d)
+    lines_mt_dim(sz, d, nt) && return LinesMT{T}(sz[d], σ, S, nt)
     get!(() -> kernel(T, sz[d], σ, S), cache, (sz[d], S > LARGE_STRIDE || !smooth(sz[d]) ? S : 0))
   end
   kernels = Tuple(dim_kernel(d) for d in reg)
@@ -102,6 +103,7 @@ function Base.show(io::IO, ::MIME"text/plain", p::FFTLPlan{T}) where {T}
     k isa Composite && print(io, "chain of length ", k.s, ", Bluestein of length ", k.q, ", convolution length ", k.blue.fwd.n)
     k isa CompositeMT && print(io, "chain of length ", k.s, ", Bluestein of length ", k.q, " on threads, convolution length ", k.blues[1].fwd.n)
     k isa BluesteinMT && print(io, "Bluestein on threads, convolution length ", k.fwd.n)
+    k isa LinesMT && print(io, "one kernel per thread, blocks of ", k.B, " lines")
     k isa FourStep && print(io, "four-step $(k.n1) × $(k.n2), radices ", radix_tuple(k.k1), " and ", radix_tuple(k.k2))
   end
 end

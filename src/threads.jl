@@ -380,6 +380,29 @@ function run_composite_mt!(py::Ptr{T}, px::Ptr{T}, P::CompositeMT{T}, nt::Int) w
   nothing
 end
 
+"""
+    LinesMT{T}
+
+Many lines of a length with a prime factor above `MAX_RADIX_PRIME` on several threads: the kernels
+(Bluestein or composite) hold buffers of their own, so each task has one, and the tasks take blocks
+of lanes of every slice from a shared counter.
+"""
+struct LinesMT{T,K} <: Kernel{T}
+  n::Int
+  B::Int                            # lanes per block
+  kernels::Vector{K}                # one per task
+  tbuf::Vector{Vector{Complex{T}}}  # two per task, for the first stage of a composite kernel
+end
+
+function LinesMT{T}(n::Int, σ::Int, S::Int, nt::Int) where {T}
+  B = clamp(cld(S, BLOCKS_PER_THREAD * nt), 1, max(1, TUNING[].block_budget ÷ n))
+  k1 = kernel(T, n, σ, B)
+  LinesMT{T,typeof(k1)}(n, B, [k1; [kernel(T, n, σ, B) for _ in 2:nt]], thread_buffers(T, k1 isa Composite ? B * n : 0, 2nt))
+end
+
+lines_mt_dim(sz, d::Int, nt::Int) =
+  !smooth(sz[d]) && (so = dim_extent(sz, d); so[1] * so[2] > 1 && threaded(so[1], sz[d], so[2], nt))
+
 # From this length on, a Bluestein line runs on several threads.
 
 use_bluestein_mt(n, nt) = nt > 1 && n >= TUNING[].bluestein_mt_min && !smooth(n)
@@ -498,6 +521,19 @@ run_kernel_dim!(py::Ptr{T}, px::Ptr{T}, p, k::BluesteinMT{T}, S::Int, n::Int, ou
 
 run_kernel_dim!(py::Ptr{T}, px::Ptr{T}, p, k::CompositeMT{T}, S::Int, n::Int, outer::Int) where {T} =
   run_composite_mt!(py, px, k, p.nthreads)
+
+function run_kernel_dim!(py::Ptr{T}, px::Ptr{T}, p, k::LinesMT{T}, S::Int, n::Int, outer::Int) where {T}
+  B = k.B
+  nb = cld(S, B)
+  step = 2 * S * n * sizeof(T)
+  GC.@preserve k parallel_items(nb * outer, min(p.nthreads, length(k.kernels))) do c, it
+    local o, b; o, b = divrem(it, nb)
+    local i0 = b * B
+    local off = o * step + i0 * 2 * sizeof(T)
+    run_lanes!(py + off, px + off, cptr(k.tbuf[2c-1]), cptr(k.tbuf[2c]), k.kernels[c], S, S, min(B, S - i0))
+  end
+  nothing
+end
 
 # Stockham chains: lane blocks when there are enough lanes, slices in groups when there are enough
 # slices, otherwise one slice after the other.
