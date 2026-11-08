@@ -361,10 +361,19 @@ const BLUESTEIN_RADIX = (2, 3, 4, 5, 6, 7, 8, 9, 10, 12)
 const BLUESTEIN_W = (Float64 = (0.0, 1.11e-3, 3.5e-4, 7.4e-4, 2.9e-4, 9.9e-4, 1.7e-4, 1.52e-3, 5.6e-4, 7.6e-4, 2.38e-3, 2.6e-4),
                      Float32 = (4.1e-4, 8.2e-4, 9.0e-5, 4.0e-4, 4.9e-4, 6.2e-4, 0.0, 1.08e-3, 3.4e-4, 1.6e-4, 1.6e-3, 5.1e-4))
 
+# The stages the weights describe: radix 4 for a power of two above 16384. Costing the radix 8
+# sequence with these weights makes such a length look cheaper than it is: Float64 n = 99991 would
+# take M = 2^18 instead of 204800, whose chain is 1.16× faster on Zen 4 and 1.11× on Zen 5.
+function cost_radices(m::Int)
+  ispow2(m) && m > 16384 || return radices(m)
+  k = trailing_zeros(m)
+  isodd(k) ? vcat(8, fill(4, (k - 3) ÷ 2)) : fill(4, k ÷ 2)
+end
+
 function bluestein_cost(::Type{T}, m::Int) where {T}
   w = BLUESTEIN_W[T === Float32 ? :Float32 : :Float64]
   c = w[end]
-  for r in radices(m)
+  for r in cost_radices(m)
     i = findfirst(==(r), BLUESTEIN_RADIX)
     c += i === nothing ? w[end-1] : w[i]
   end
