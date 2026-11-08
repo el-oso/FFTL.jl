@@ -637,4 +637,6 @@ end
   include("radix_table.jl")
   @test isfile(radix_table_path())
   isfile(radix_table_path()) && @test radix_table_lines() == readlines(radix_table_path())
+  # The cost model of the Bluestein length describes radix 4 stages, whatever a long power of two runs.
+  Sys.ARCH === :x86_64 && @test FFTL.bluestein_length(Float64, 2 * 99991 - 1) == 204800
 end

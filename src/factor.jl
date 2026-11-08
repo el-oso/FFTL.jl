@@ -2,7 +2,7 @@
 #
 # Rules from brute-force searches over all decompositions (M1, Float32 and Float64, n ≤ 4·10^6):
 # - n ≤ 16 with small factors: one codelet.
-# - Powers of two up to 16384 (stride ≤ LARGE_STRIDE), with 32 vector registers: radix 8 as often
+# - Powers of two up to RADIX8_MAX (stride ≤ LARGE_STRIDE), with 32 vector registers: radix 8 as often
 #   as possible and a 4 (two 4s for one spare bit) for the rest, 2–7 % faster than 4s with one 8
 #   up to 4096 on the M1; on Tiger Lake (AVX-512) 7–30 % from 4096 on (S = 1) and up to 45 % in
 #   batches, within noise below; on Zen 3 (AVX2, 16
@@ -73,6 +73,10 @@ const L1_SET_LOG2 = Sys.ARCH === :aarch64 ? 14 : 12
 # Vector registers of the ISA (NEON and AVX-512: 32, also for 256-bit kernels under AVX-512VL).
 const VEC_REGS = Sys.ARCH === :aarch64 || HAS_AVX512 ? 32 : 16
 const RADIX8_POW2 = VEC_REGS == 32
+# Longest power of two that takes the radix 8 sequence. With AVX-512 it is mostly 1.1–1.45× faster
+# than radix 4 for single lines from 2^15 to 2^24 (Zen 4, Zen 5); aarch64 has not been measured
+# above 16384.
+const RADIX8_MAX = HAS_AVX512 ? typemax(Int) : 16384
 
 function set_conflict(rs, n, S, esize = 16)
   for r in rs
@@ -103,7 +107,7 @@ function heuristic_radices(n::Int, S::Int)
   if ispow2(n) && n > small && n <= 64
     return S > LARGE_STRIDE ? (n == 64 ? [4, 4, 4] : [4, n ÷ 4]) : [4, n ÷ 4]
   end
-  if RADIX8_POW2 && ispow2(n) && 64 < n <= 16384 && S <= LARGE_STRIDE
+  if RADIX8_POW2 && ispow2(n) && 64 < n <= RADIX8_MAX && S <= LARGE_STRIDE
     k = trailing_zeros(n)
     spare = k % 3
     return vcat(spare == 2 ? [4] : spare == 1 ? [4, 4] : Int[], fill(8, (k - (spare == 2 ? 2 : spare == 1 ? 4 : 0)) ÷ 3))
